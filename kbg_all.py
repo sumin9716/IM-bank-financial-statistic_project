@@ -255,8 +255,10 @@ df_scored, rpt = score_linear_preserve_shape(
 )
 
 # score만 저장
+df_scored[['score']] = df_scored[['score']] + 10 # 기존 모델과 차이점 상쇄시키기 위함 (기존 개별파라미터 모델)
 df_scored[['score']].to_csv("score_all.csv", index=False, encoding="utf-8-sig")
 
 # (선택) 간단 요약 출력
 print(f"[INFO] 사용 피처: {available_features}")
 print(df_scored['score'].describe())
+
