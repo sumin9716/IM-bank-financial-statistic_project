@@ -231,7 +231,7 @@ WEIGHTED_OMEGA = {
 
 # 가중평균 lam / beta
 WEIGHTED_LAM  = 0.6574
-WEIGHTED_BETA = 1.0
+WEIGHTED_BETA = 0.99 # 전체 Beta 값의 평균
 
 # ================================================================
 # 8) 실행  (공통 파라미터로 전체 스코어 계산 후 저장)
@@ -261,4 +261,5 @@ df_scored[['score']].to_csv("score_all.csv", index=False, encoding="utf-8-sig")
 # (선택) 간단 요약 출력
 print(f"[INFO] 사용 피처: {available_features}")
 print(df_scored['score'].describe())
+
 
