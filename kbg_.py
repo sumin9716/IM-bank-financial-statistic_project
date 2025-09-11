@@ -17,11 +17,65 @@ df = pd.read_csv(
     encoding='cp949'
 )
 
-# (옵션) 신용등급 외부데이터: 현재 로직 미사용, 필요 시 후처리에서 join
-# rating = pd.read_csv(
-#     r"G:\내 드라이브\Colab Notebooks\iM\Team_project\stats_proj\기업신용등급 분포.csv",
-#     encoding='cp949'
-# )
+#  외부 데이터 베타값 (월별신용공여추이)
+beta_df = pd.read_csv(
+    r'Beta_Industry.csv',
+    encoding='cp949'
+)
+
+# ================================================================
+#  (A) β 전처리 + df에 병합
+# ================================================================
+def _norm_month(s: str) -> str:
+    return str(s).strip().replace('-', '').replace('.', '')
+
+def _norm_cat(s: str) -> str:
+    return str(s).strip().replace('  ', ' ')
+
+# 1) long 변환
+beta_long = beta_df.melt(
+    id_vars=['기준년월'],
+    var_name='업종_대분류',
+    value_name='beta'
+).dropna(subset=['beta'])
+
+# 2) 키 정규화
+beta_long['기준년월']   = beta_long['기준년월'].map(_norm_month).astype(int)
+beta_long['업종_대분류'] = beta_long['업종_대분류'].map(_norm_cat)
+
+# 3) 202201~202203 → 같은 업종의 202204 값으로 채움
+REF_MONTH = 202204
+FILL_MONTHS = [202201, 202202, 202203]
+
+ref_beta = (
+    beta_long.loc[beta_long['기준년월'] == REF_MONTH, ['업종_대분류','beta']]
+    .set_index('업종_대분류')['beta'].to_dict()
+)
+
+fill_rows = [{'기준년월': m, '업종_대분류': up, 'beta': b}
+             for up, b in ref_beta.items() for m in FILL_MONTHS]
+beta_fill = pd.DataFrame(fill_rows)
+
+# 기존 해당 구간 제거 후 대체
+mask_old = beta_long['기준년월'].isin(FILL_MONTHS)
+beta_long = pd.concat([beta_long.loc[~mask_old], beta_fill], ignore_index=True)
+beta_long = beta_long.sort_values(['업종_대분류','기준년월']).reset_index(drop=True)
+
+# 병합 편의를 위해 문자열로
+beta_long['기준년월'] = beta_long['기준년월'].astype(str)
+
+# 4) df 키 정규화 후 병합
+df['기준년월']   = df['기준년월'].map(_norm_month)
+df['업종_대분류'] = df['업종_대분류'].map(_norm_cat)
+
+df = df.merge(beta_long, on=['기준년월','업종_대분류'], how='left', validate='m:1')
+
+miss_rate = df['beta'].isna().mean()
+print(f"[β 매칭 실패율] {miss_rate:.2%}")
+if miss_rate > 0:
+    print(df[df['beta'].isna()][['기준년월','업종_대분류']].drop_duplicates().head(10))
+
+df['beta'] = pd.to_numeric(df['beta'], errors='coerce').fillna(1.0)  # 정책: 미매칭은 1.0
 
 # ================================================================
 # 1) 거래채널별 거래건수/좌수 전처리
@@ -156,14 +210,13 @@ def transform_linear_scaler(X: pd.DataFrame, params: dict):
 # ================================================================
 # 5) 스코어 계산 (선형 패널티)
 #    S = β * (Σ ω_i·α̂ - λ·Σ ρ·α̂)
-#    (여기서는 [0,100] 리스케일 후 β 곱)
+#    (여기서는 [0,100] 리스케일 후 행별 β 곱)
 # ================================================================
 def score_linear_preserve_shape(
     df_est: pd.DataFrame,
     feature_cols: list,
     weights: dict,
     lam: float,
-    beta: float = 1.0,
     scaler_method: str = 'minmax',
     q_low: float = 0.01, q_high: float = 0.99,
     l1_normalize: bool = True,
@@ -197,15 +250,20 @@ def score_linear_preserve_shape(
     else:
         S_scaled = S_raw
 
-    # β 적용 후 0~100 클립
-    S_final = np.clip(beta * S_scaled, 0, 100)
+    # 행별 β(df_est['beta']) 적용.
+    if 'beta' in df_est.columns:
+        beta_series = pd.to_numeric(df_est['beta'], errors='coerce').fillna(1.0)
+        S_final = np.clip(S_scaled * beta_series, 0, 100)
+    else:
+        S_final = np.clip(S_scaled, 0, 100)
 
     out = df_est.copy()
     out['score'] = S_final.round(2)
 
     report = {
         "weights(L1={})".format('1' if l1_normalize else 'raw'): w.to_dict(),
-        "lambda": lam, "beta": beta,
+        "lambda": lam,
+        "beta_used": "row-wise 'beta' column",
         "rho_zero_ratio": rho.to_dict(),
         "scaler": scaler_method, "quantiles": (q_low, q_high)
     }
@@ -220,6 +278,66 @@ COMMON_FEATURES = [
 ]
 
 INDUSTRY_CONFIG = {
+    '교육 서비스업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6, '전담고객여부': 0.6,
+            '예금잔액': 1.0, '투자잔액': 1.0, '여신대출잔액': 1.2,
+            '예금비중': 0.8, '대출비중': -1.2,
+            '여신_신용카드_좌수': 0.8, '거래금액': 0.8, '거래건수': 0.8
+        },
+        'lam': 0.7
+    },
+    '농업, 임업 및 어업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6, '전담고객여부': 0.6,
+            '예금잔액': 1.0, '투자잔액': 1.0, '여신대출잔액': 1.2,
+            '예금비중': 0.8, '대출비중': -1.2,
+            '여신_신용카드_좌수': 0.8, '거래금액': 0.8, '거래건수': 0.8
+        },
+        'lam': 0.45
+    },
+    '수도, 하수 및 폐기물 처리, 원료 재생업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6, '전담고객여부': 0.6,
+            '예금잔액': 1.0, '투자잔액': 0.6, '여신대출잔액': 1.2,
+            '예금비중': 0.9, '대출비중': -1.2,
+            '여신_신용카드_좌수': 1.0, '거래금액': 1.0, '거래건수': 1.0
+        },
+        'lam': 0.6
+    },
+    '전기, 가스, 증기 및 공기조절 공급업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6, '전담고객여부': 1.2,
+            '예금잔액': 1.2, '투자잔액': 0.5, '여신대출잔액': 1.2,
+            '예금비중': 0.8, '대출비중': -0.7,
+            '여신_신용카드_좌수': 1.2, '거래금액': 1.2, '거래건수': 1.2
+        },
+        'lam': 0.75
+    },
+    '전문, 과학 및 기술 서비스업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6, '전담고객여부': 0.6,
+            '예금잔액': 0.8, '투자잔액': 0.6, '여신대출잔액': 1.2,
+            '예금비중': 0.8, '대출비중': -1.2,
+            '여신_신용카드_좌수': 0.8, '거래금액': 0.8, '거래건수': 0.8
+        },
+        'lam': 0.5
+    },
+    '정보통신업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6, '전담고객여부': 1.2,
+            '예금잔액': 1.0, '투자잔액': 0.5, '여신대출잔액': 1.2,
+            '예금비중': 1.2, '대출비중': -1.2,
+            '여신_신용카드_좌수': 1.2, '거래금액': 0.8, '거래건수': 1.2
+        },
+        'lam': 0.75
+    },
     '도매 및 소매업': {
         'feature_cols': COMMON_FEATURES,
         'omega': {
@@ -228,7 +346,7 @@ INDUSTRY_CONFIG = {
             '예금비중': 1.2, '대출비중': -0.6,
             '여신_신용카드_좌수': 0.8, '거래금액': 0.8, '거래건수': 0.99
         },
-        'lam': 0.6, 'beta': 1.0
+        'lam': 0.6
     },
     '부동산업': {
         'feature_cols': COMMON_FEATURES,
@@ -238,7 +356,7 @@ INDUSTRY_CONFIG = {
             '예금비중': 1.2, '대출비중': -1.2,
             '여신_신용카드_좌수': 0.8, '거래금액': 0.99, '거래건수': 0.99
         },
-        'lam': 0.6, 'beta': 1.0
+        'lam': 0.6
     },
     '사업시설 관리, 사업 지원 및 임대 서비스업': {
         'feature_cols': COMMON_FEATURES,
@@ -248,7 +366,23 @@ INDUSTRY_CONFIG = {
             '예금비중': 0.8, '대출비중' : -1.0,
             '여신_신용카드_좌수': 0.8, '거래금액': 0.8, '거래건수': 0.8
         },
-        'lam': 0.5, 'beta': 1.0
+        'lam': 0.5
+    },
+    '건설업': {
+        'feature_cols': COMMON_FEATURES,
+        'omega': {
+            '법인_고객등급': 0.6,
+            '전담고객여부': 0.6,
+            '예금잔액': 1.2,
+            '투자잔액': 0.5,
+            '여신대출잔액': 1.2,
+            '예금비중': 1.2,
+            '대출비중': -0.8,
+            '여신_신용카드_좌수': 0.8,
+            '거래금액': 0.8,
+            '거래건수': 0.8
+        },
+        'lam': 0.6
     }
 }
 
@@ -268,51 +402,55 @@ def score_by_industry_and_concat(
     if industry_col not in df_all.columns:
         raise KeyError(f"'{industry_col}' 컬럼이 없습니다.")
 
+    # 결과 스코어(전체 인덱스 유지)
     final_score = pd.Series(index=df_all.index, dtype=float)
-    industries = list(config_map.keys())  # 오직 설정된 업종만
-
+    industries = list(config_map.keys())  # 설정된 업종만
     logs = []
+
     for ind in industries:
         cfg = config_map[ind]
         feature_cols = cfg['feature_cols']
         weights     = cfg['omega']
         lam         = cfg['lam']
-        beta        = cfg['beta']
 
+        # 필요한 컬럼 체크
         missing = [c for c in feature_cols if c not in df_all.columns]
         if missing:
             logs.append(f"[WARN] 업종 '{ind}' : 누락 컬럼 {missing} → 스킵")
             continue
 
+        # 해당 업종 서브셋
         mask = (df_all[industry_col].astype(str) == ind)
         df_sub = df_all.loc[mask].copy()
         if df_sub.empty:
             logs.append(f"[SKIP] 업종 '{ind}' : 행 없음")
             continue
 
+        # 스코어 계산 (행별 beta 사용)
         scored, rpt = score_linear_preserve_shape(
             df_est=df_sub,
             feature_cols=feature_cols,
             weights=weights,
             lam=lam,
-            beta=beta,
             scaler_method=scaler_method,
             l1_normalize=l1_normalize,
             rescale_0_100=rescale_0_100
         )
 
+        # 결과 반영
         final_score.loc[scored.index] = scored['score'].astype(float)
-        logs.append(f"[OK] 업종 '{ind}' : n={len(df_sub)}, lam={lam}, beta={beta}")
+        logs.append(f"[OK] 업종 '{ind}' : n={len(df_sub)}, lam={lam}, row-wise beta 사용")
 
     # 설정 외 업종은 NaN 유지
     df_out = df_all.copy()
     df_out['score'] = final_score
 
-    other_cnt = df_out[df_out[industry_col].astype(str).isin(industries) == False].shape[0]
+    other_cnt = (~df_out[industry_col].astype(str).isin(industries)).sum()
     if other_cnt > 0:
         logs.append(f"[INFO] 설정되지 않은 업종 행 {other_cnt}건은 score=NaN")
 
     return df_out, logs
+
 
 # ================================================================
 # 8) 실행 
@@ -327,4 +465,6 @@ df_scored, run_logs = score_by_industry_and_concat(
 )
 
 #  score만 저장 
-df_scored[['score']].to_csv("score2.csv", index=False, encoding="utf-8-sig")
+df_scored[['score']].to_csv("score_beta.csv", index=False, encoding="utf-8-sig")
+
+print(df_scored['score'].describe())
