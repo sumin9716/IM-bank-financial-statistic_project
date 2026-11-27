@@ -1,0 +1,13 @@
+# 은행 교육용 데이터와 외부 베타 자료는 저장소에 올리지 않는다
+data/
+outputs/
+
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.DS_Store
