@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8.0
+# 0.6부터 노트북도 기본으로 검사한다
+ruff>=0.6

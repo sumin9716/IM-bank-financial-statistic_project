@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["F", "E9", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# 노트북의 업종별 셀은 각각 따로 실행되도록 같은 함수를 셀마다 다시 정의한다.
+"notebooks/*.ipynb" = ["F811"]
