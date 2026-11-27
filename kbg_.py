@@ -463,6 +463,8 @@ df_scored, run_logs = score_by_industry_and_concat(
     l1_normalize=True,
     rescale_0_100=True
 )
+for line in run_logs:
+    print(line)
 
 #  score만 저장 
 df_scored[['score']].to_csv("score_beta.csv", index=False, encoding="utf-8-sig")
