@@ -24,7 +24,7 @@ def scale_to_unit(
     lo·hi가 유한하지 않거나 같으면 (0, 1)을 쓴다.
     """
     if method not in ("minmax", "winsor_minmax"):
-        raise ValueError("method must be 'minmax' or 'winsor_minmax'")
+        raise ValueError(f"method는 'minmax' 또는 'winsor_minmax'여야 합니다: {method!r}")
 
     scaled = {}
     for col in X.columns:
