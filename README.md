@@ -128,6 +128,6 @@ python -m pytest             # 합성 데이터 테스트
 ruff check .                 # 설정은 pyproject.toml
 ```
 
-- 테스트용 합성 데이터([`tests/synthetic.py`](tests/synthetic.py))는 잔액 열이 위치로 합산되기 때문에 실제 데이터의 열 순서를 흉내 냅니다. 잔액 열 위치를 바꾸면 `preprocess.py`의 `*_POSITIONS` 상수와 함께 고칩니다.
+- 잔액은 열 위치로 합산하므로 테스트용 합성 데이터([`tests/synthetic.py`](tests/synthetic.py))도 잔액 열을 그 위치에 둡니다. 입력 자료의 열 순서가 바뀌면 `preprocess.py`의 `*_POSITIONS` 상수와 합성 데이터를 함께 고칩니다.
 - 업종별 모델의 피처 순서는 합산 순서를 정하므로 `params.py`의 `INDUSTRY_FEATURES` 순서를 바꾸면 점수가 소수점 아래에서 달라질 수 있습니다.
 - 노트북의 업종별 셀은 따로 실행되도록 같은 함수를 셀마다 다시 정의하므로 ruff의 F811(재정의) 경고를 노트북에서만 끕니다.
