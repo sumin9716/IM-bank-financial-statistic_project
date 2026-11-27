@@ -166,12 +166,12 @@ else:
 # ================================================================
 def ensure_numeric_grade_and_ded(df_in: pd.DataFrame) -> pd.DataFrame:
     out = df_in.copy()
-    if '법인_고객등급' in out.columns and out['법인_고객등급'].dtype == 'object':
+    if '법인_고객등급' in out.columns and not pd.api.types.is_numeric_dtype(out['법인_고객등급']):
         out['법인_고객등급'] = (
             out['법인_고객등급'].astype(str).str.strip()
               .map({'일반': 1, '우수': 2, '최우수': 3})
         )
-    if '전담고객여부' in out.columns and out['전담고객여부'].dtype == 'object':
+    if '전담고객여부' in out.columns and not pd.api.types.is_numeric_dtype(out['전담고객여부']):
         out['전담고객여부'] = (
             out['전담고객여부'].astype(str).str.strip().str.upper()
               .map({'Y': 1, 'N': 0})
