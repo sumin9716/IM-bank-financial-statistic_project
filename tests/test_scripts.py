@@ -30,7 +30,8 @@ def test_score_common_writes_one_score_per_row(tmp_path, capsys):
     scores = pd.read_csv(out, encoding="utf-8-sig")
     assert list(scores.columns) == ["score"]
     assert len(scores) == 300
-    assert scores["score"].between(10, 110).all()
+    # 0~100 점수에 β=0.99를 곱하고 10을 더하므로 10~109
+    assert scores["score"].min() == 10 and scores["score"].max() == 109
     assert "사용 피처" in capsys.readouterr().out
 
 
